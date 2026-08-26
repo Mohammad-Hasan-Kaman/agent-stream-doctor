@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Environments
+.venv/
+venv/
+.env
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Captured streams may contain private prompt data - never commit them
+stream.txt
+*.stream.txt
+
+# OS / editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
