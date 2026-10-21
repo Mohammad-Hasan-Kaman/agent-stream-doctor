@@ -5,4 +5,9 @@ detect empty streams, reasoning-only replies, missing finish_reason,
 malformed SSE, and incomplete tool calls.
 """
 
-__version__ = "0.1.0"
+from .doctor import diagnose
+from .models import Finding, Report, Severity
+
+__version__ = "0.2.0"
+
+__all__ = ["diagnose", "Report", "Finding", "Severity", "__version__"]

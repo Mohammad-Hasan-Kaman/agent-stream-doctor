@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-10-21
+
+### Fixed
+
+- `from agent_stream_doctor import diagnose` now works. The package
+  `__init__` did not re-export anything, so the import documented in the
+  README raised an `ImportError`. `diagnose`, `Report`, `Finding` and
+  `Severity` are now exported and listed in `__all__`.
+
 ## [0.1.0] - 2026-08-26
 
 ### Added
