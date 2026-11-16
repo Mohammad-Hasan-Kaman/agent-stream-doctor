@@ -3,6 +3,27 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- The analyzer no longer crashes on valid JSON with an unexpected shape
+  (e.g. `delta` as a string, `choices` as a string, `"function": null`);
+  such chunks now produce findings instead of an `AttributeError`.
+- `data-after-done` now detects chunks arriving after a single `[DONE]`
+  sentinel; previously only a second `[DONE]` triggered it, and trailing
+  chunks after one `[DONE]` were reported as healthy.
+- A completed tool call no longer triggers a false `empty-content-stream`
+  error, and a stream containing only `[DONE]` is now reported as an
+  empty stream instead of healthy.
+- SSE parser: a UTF-8 BOM no longer silently drops the first chunk,
+  events carry their real line numbers, a payload split across several
+  `data:` lines parses as one event, content sent as a list of parts is
+  counted, and payloads that are valid JSON but not objects are flagged.
+- CLI: unreadable input files, an unreadable `--messages-file`, and
+  failed `record` requests now print a one-line error and exit with
+  code 2 instead of a traceback.
+
 ## [0.2.0] - 2026-10-21
 
 ### Fixed

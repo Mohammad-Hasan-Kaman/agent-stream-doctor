@@ -65,14 +65,17 @@ This calls the endpoint with `"stream": true`, saves the raw SSE text to `stream
 agent-stream-doctor report
 ----------------------------------------
   data_chunks: 1
+  done_sentinels: 1
+  json_errors: 0
+  sse_line_errors: 0
   content_chars: 0
   reasoning_chars: 640
+  finish_reasons: ['stop']
   roles_seen: ['assistant']
 
 [ERROR  ] reasoning-only-response
          Model streamed 640 chars of reasoning but never emitted any final answer content.
-         why: The model streamed reasoning/thinking content but never produced a final
-         answer. Some routers drop or mis-map reasoning channels...
+         why: The model streamed reasoning/thinking content but never produced a final answer. Some routers drop or mis-map reasoning channels; your client may need to fall back to a non-streaming request or a different model when this pattern appears.
 
 Result: 1 error(s), 0 warning(s)
 ```
@@ -125,7 +128,7 @@ Reasoning content is recognised across common vendor shapes: `delta.reasoning_co
 - **Pure text analysis.** `diagnose()` takes the raw SSE text and returns findings. No network calls, no magic.
 - **Tolerant parser.** A diagnostic tool that crashes on malformed input is useless - every deviation becomes a finding instead of an exception.
 - **Explanations included.** Every check ships with a short "why this happens / what to do" string, so reports teach instead of just alarming.
-- **Stdlib only.** The core library imports nothing beyond Python itself. `--record` needs `requests`, installed separately.
+- **Stdlib only.** The core library imports nothing beyond Python itself. The `record` command needs `requests`, installed separately.
 
 ## Roadmap
 
