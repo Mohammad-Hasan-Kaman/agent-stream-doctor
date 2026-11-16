@@ -79,17 +79,17 @@ def cmd_record(args: argparse.Namespace) -> int:
         print("Provide --message or --messages-file", file=sys.stderr)
         return 2
 
-    collected = []
+    collected = bytearray()
     try:
         with requests.post(args.base_url, headers=headers, json=payload, stream=True,
                            timeout=args.timeout) as resp:
             resp.raise_for_status()
-            with open(args.out, "w", encoding="utf-8") as fh:
-                for raw in resp.iter_lines(decode_unicode=True):
-                    if raw is None:
+            with open(args.out, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if not chunk:
                         continue
-                    fh.write(raw + "\n")
-                    collected.append(raw)
+                    fh.write(chunk)
+                    collected.extend(chunk)
     except requests.RequestException as exc:
         print(f"Request failed: {exc}", file=sys.stderr)
         return 2
@@ -97,7 +97,14 @@ def cmd_record(args: argparse.Namespace) -> int:
         print(f"Could not write the capture file: {exc}", file=sys.stderr)
         return 2
 
-    text = "\n".join(collected)
+    # Capture the raw bytes exactly as they arrived. The previous
+    # iter_lines(decode_unicode=True) path decoded with resp.encoding,
+    # which falls back to a guessed ISO-8859-1 when the server sends
+    # no charset (many OpenAI-compatible routers don't) - mojibaking
+    # every non-ASCII stream and writing the corruption to disk as
+    # the 'raw' capture. SSE is UTF-8 by definition; bytes that are
+    # not valid UTF-8 become U+FFFD here and surface as findings.
+    text = bytes(collected).decode("utf-8", errors="replace")
     report = diagnose(text)
     print(_format_report(report, as_json=args.json))
     if args.save_report:
@@ -108,7 +115,11 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 def cmd_analyze(args: argparse.Namespace) -> int:
     try:
-        with open(args.file, encoding="utf-8") as fh:
+        # errors="replace": a capture containing a few invalid UTF-8
+        # bytes (exactly the kind of proxy mangling this tool exists
+        # to diagnose - and exactly what `record` may legitimately
+        # save) should be diagnosed, not refused as unreadable.
+        with open(args.file, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except (OSError, UnicodeError) as exc:
         print(f"Could not read {args.file}: {exc}", file=sys.stderr)
