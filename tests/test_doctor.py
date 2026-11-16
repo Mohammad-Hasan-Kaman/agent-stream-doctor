@@ -261,6 +261,15 @@ def test_deeply_nested_payload_does_not_crash():
     assert "unparseable-tool-arguments" in ids(report)
 
 
+def test_null_payload_is_flagged_not_healthy():
+    """'data: null' parses as JSON (to None) but is not a chunk
+    object. It used to slip past the invalid-json check and report
+    the stream HEALTHY with zero findings."""
+    report = diagnose("data: null\n\ndata: [DONE]\n\n")
+    assert "invalid-json-payload" in ids(report)
+    assert not report.healthy
+
+
 def test_report_serializes_to_json():
     report = diagnose(streams.REASONING_ONLY)
     data = json.loads(json.dumps(report.to_dict()))

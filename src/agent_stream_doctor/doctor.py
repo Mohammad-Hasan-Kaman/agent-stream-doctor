@@ -44,7 +44,11 @@ def diagnose(text: str) -> Report:
     bad_json = [
         e
         for e in data_events
-        if e.json_error or (e.json_value is not None and not isinstance(e.json_value, dict))
+        # A payload is usable only if it parsed into an object. The
+        # old 'is not None' guard let a literal 'null' payload slip
+        # through entirely - json_value is None there too - so a
+        # stream of nothing but 'data: null' reported HEALTHY.
+        if e.json_error or not isinstance(e.json_value, dict)
     ]
     if bad_json:
         first = bad_json[0]
