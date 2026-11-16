@@ -99,6 +99,8 @@ def diagnose(text: str) -> Report:
     reasoning_parts: List[str] = []
     finish_reasons: List[Optional[str]] = []
     tool_calls: Dict[Any, Dict[str, Any]] = {}
+    anon_seq = 0
+    last_anon_key: Optional[Any] = None
 
     for ch in chunks:
         role = chunk_role(ch)
@@ -121,7 +123,36 @@ def diagnose(text: str) -> Report:
             finish_reasons.append(fr)
 
         for tc in chunk_tool_call_deltas(ch):
-            idx = tc.get("index", tc.get("id"))
+            idx = tc.get("index")
+            if idx is None:
+                # 'index' may be present but null while the call is
+                # identified by 'id' alone.
+                idx = tc.get("id")
+            if idx is not None and not isinstance(idx, (str, int, float, bool)):
+                # A list/object index cannot key a call - and would
+                # crash setdefault() as an unhashable key. Treat the
+                # delta as anonymous instead.
+                idx = None
+            if idx is None:
+                # No usable index or id. Deltas that start a call
+                # (they carry an id or a function name) open a fresh
+                # anonymous entry; bare continuation fragments extend
+                # the previous one. Without this, two distinct calls
+                # merged into one entry and their arguments strings
+                # concatenated into invalid JSON.
+                fn_probe = tc.get("function")
+                starts_new = bool(tc.get("id")) or (
+                    isinstance(fn_probe, dict) and bool(fn_probe.get("name"))
+                )
+                if last_anon_key is None or starts_new:
+                    anon_seq += 1
+                    last_anon_key = ("__anonymous__", anon_seq)
+                    tool_calls[last_anon_key] = {
+                        "id": None,
+                        "name": "",
+                        "arguments": "",
+                    }
+                idx = last_anon_key
             entry = tool_calls.setdefault(idx, {"id": None, "name": "", "arguments": ""})
             if tc.get("id"):
                 entry["id"] = tc["id"]
@@ -233,11 +264,12 @@ def diagnose(text: str) -> Report:
             try:
                 _json.loads(entry["arguments"] or "{}")
             except ValueError as exc:
+                label = idx[1] if isinstance(idx, tuple) else idx
                 findings.append(
                     Finding(
                         "unparseable-tool-arguments",
                         Severity.ERROR,
-                        f"Tool call #{idx} ({entry['name'] or 'unknown'}) has "
+                        f"Tool call #{label} ({entry['name'] or 'unknown'}) has "
                         f"arguments that are not valid JSON: {exc}",
                         evidence=entry["arguments"][:200],
                     )

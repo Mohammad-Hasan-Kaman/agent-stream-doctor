@@ -192,6 +192,55 @@ def test_mixed_type_finish_reasons_do_not_crash():
     assert report.stats["finish_reasons"] == ["stop"]
 
 
+def test_unhashable_tool_call_index_does_not_crash():
+    """tool_calls[].index arriving as a list or object used to raise
+    TypeError in dict.setdefault - the delta is diagnosed, not fatal."""
+    for idx in ("[0]", '{"i":0}'):
+        text = (
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":'
+            f"{idx},"
+            '"function":{"name":"f","arguments":"{}"}}]}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        report = diagnose(text)  # must not raise
+        assert isinstance(report.findings, list)
+
+
+def test_tool_call_identified_by_id_when_index_is_null():
+    """'index': null with a real 'id' must key the call by its id -
+    .get('index', fallback) never reaches the fallback when the key
+    exists with a null value."""
+    text = (
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":null,'
+        '"id":"call_9","function":{"name":"f","arguments":"{\\"a\\":"}}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":null,'
+        '"id":"call_9","function":{"arguments":"1}"}}]}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    report = diagnose(text)
+    assert report.healthy, [f.to_dict() for f in report.findings]
+
+
+def test_two_anonymous_tool_calls_are_not_merged():
+    """Two calls with neither index nor id are still two calls: a
+    delta carrying a function name starts a new one. Merging them
+    concatenated both arguments strings into invalid JSON and
+    produced a false unparseable-tool-arguments error."""
+    text = (
+        'data: {"choices":[{"delta":{"tool_calls":[{"function":'
+        '{"name":"a","arguments":"{}"}}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"tool_calls":[{"function":'
+        '{"name":"b","arguments":"{}"}}]}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    report = diagnose(text)
+    assert report.stats["tool_calls_started"] == 2
+    assert "unparseable-tool-arguments" not in ids(report)
+    assert report.healthy, [f.to_dict() for f in report.findings]
+
+
 def test_report_serializes_to_json():
     report = diagnose(streams.REASONING_ONLY)
     data = json.loads(json.dumps(report.to_dict()))
