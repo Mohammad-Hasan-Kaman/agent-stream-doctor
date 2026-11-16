@@ -49,6 +49,35 @@ def test_comments_and_unknown_fields_are_legal():
     assert errors == []
 
 
+def test_unicode_line_separators_inside_strings_do_not_split():
+    """U+2028 / U+2029 / U+0085 are legal unescaped characters in a
+    JSON string, but str.splitlines() treats them as line breaks and
+    shredded such payloads into phantom malformed findings."""
+    for sep in ("\u2028", "\u2029", "\u0085"):
+        text = (
+            'data: {"choices":[{"delta":{"content":"a' + sep + 'b"}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        events, errors = parse_sse_lines(text)
+        assert errors == [], sep
+        assert len(events) == 2, sep
+        assert events[0].json_value["choices"][0]["delta"]["content"] == "a" + sep + "b"
+
+
+def test_cr_only_framing_still_splits():
+    events, _ = parse_sse_lines('data: {"a":1}\r\rdata: [DONE]\r\r')
+    assert len(events) == 2
+    assert events[-1].is_done_sentinel
+
+
+def test_only_one_leading_space_is_stripped():
+    """Per the SSE spec exactly one space after the colon is framing;
+    the rest is payload."""
+    events, _ = parse_sse_lines('data:  {"a":1}\n\n')
+    assert events[0].raw_data == ' {"a":1}'
+    assert events[0].json_value == {"a": 1}
+
+
 def test_colonless_line_is_a_parse_error_with_line_number():
     _, errors = parse_sse_lines('data: {"a":1}\n\nnonsense line\n\n')
     assert len(errors) == 1

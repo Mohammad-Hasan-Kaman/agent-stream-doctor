@@ -90,8 +90,14 @@ def parse_sse_lines(text: str):
             events.append(ParsedEvent(buffer_start, "\n".join(data_buffer)))
             data_buffer.clear()
 
-    for line_no, raw_line in enumerate(text.splitlines(), start=1):
-        line = raw_line.rstrip("\r")
+    # Split only on the SSE line terminators (CRLF, CR, LF).
+    # str.splitlines() also splits on U+2028, U+2029, U+0085, VT and
+    # FF - all of which can legally appear *inside* a JSON string in
+    # a content delta, where splitting corrupts a valid payload into
+    # phantom malformed-line and invalid-JSON findings.
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    for line_no, raw_line in enumerate(lines, start=1):
+        line = raw_line
         if line == "":
             # Blank line terminates a multi-line data block.
             flush()
@@ -101,7 +107,11 @@ def parse_sse_lines(text: str):
             continue
         if ":" in line:
             field, _, value = line.partition(":")
-            value = value.lstrip(" ")
+            # The SSE spec removes exactly one leading space from the
+            # value; stripping them all eats real content when a
+            # string payload continues across data: lines.
+            if value.startswith(" "):
+                value = value[1:]
             if field == "data":
                 if data_buffer and _is_complete_payload("\n".join(data_buffer)):
                     flush()
