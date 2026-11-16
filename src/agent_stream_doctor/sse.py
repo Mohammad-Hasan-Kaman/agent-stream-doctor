@@ -36,7 +36,11 @@ class ParsedEvent:
             self.is_done_sentinel = False
             try:
                 self.json_value = json.loads(raw_data)
-            except ValueError as exc:
+            except (ValueError, RecursionError) as exc:
+                # RecursionError: a payload nested tens of thousands
+                # of levels deep exceeds the decoder's stack. It is
+                # a RuntimeError, not a ValueError - without catching
+                # it here, adversarial nesting crashes the diagnosis.
                 self.json_error = str(exc)
 
 
@@ -49,7 +53,7 @@ def _is_complete_payload(text: str) -> bool:
     try:
         json.loads(text)
         return True
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
 
 

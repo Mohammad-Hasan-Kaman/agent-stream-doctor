@@ -263,7 +263,7 @@ def diagnose(text: str) -> Report:
 
             try:
                 _json.loads(entry["arguments"] or "{}")
-            except ValueError as exc:
+            except (ValueError, RecursionError) as exc:
                 label = idx[1] if isinstance(idx, tuple) else idx
                 findings.append(
                     Finding(

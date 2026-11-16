@@ -241,6 +241,26 @@ def test_two_anonymous_tool_calls_are_not_merged():
     assert report.healthy, [f.to_dict() for f in report.findings]
 
 
+def test_deeply_nested_payload_does_not_crash():
+    """json.loads raises RecursionError (not ValueError) once a
+    payload is nested tens of thousands of levels deep. Every parse
+    site must treat that as a malformed payload, not an exception."""
+    deep = "[" * 20000 + "]" * 20000
+    report = diagnose(f"data: {deep}\n\ndata: [DONE]\n\n")
+    assert "invalid-json-payload" in ids(report)
+
+    chunk = {"choices": [{"delta": {"tool_calls": [
+        {"index": 0, "function": {"name": "f", "arguments": deep}},
+    ]}}]}
+    text = (
+        f"data: {json.dumps(chunk)}\n\n"
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    report = diagnose(text)  # arguments parse site must not raise
+    assert "unparseable-tool-arguments" in ids(report)
+
+
 def test_report_serializes_to_json():
     report = diagnose(streams.REASONING_ONLY)
     data = json.loads(json.dumps(report.to_dict()))
