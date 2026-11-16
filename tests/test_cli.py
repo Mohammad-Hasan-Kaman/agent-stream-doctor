@@ -132,6 +132,60 @@ def test_analyze_tolerates_invalid_utf8_bytes(tmp_path, capsys):
     assert "Could not read" not in capsys.readouterr().err
 
 
+def test_record_save_report_failure_is_clean(tmp_path, capsys, fake_requests):
+    """An unwritable --save-report path used to traceback with exit
+    code 1; it is an IO failure and must exit 2 with one clean line."""
+    fake_requests["chunks"] = [b"data: [DONE]\n\n"]
+    rc = main([
+        "record",
+        "--base-url", "http://stub.invalid/v1/chat/completions",
+        "--model", "m",
+        "--message", "hi",
+        "--out", str(tmp_path / "cap.txt"),
+        "--save-report", str(tmp_path / "no-such-dir" / "report.json"),
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "Could not write the report file" in err
+    assert "Traceback" not in err
+
+
+def test_record_rejects_non_positive_timeout(capsys):
+    """--timeout 0 used to reach urllib3, which raised a bare
+    ValueError traceback. argparse now rejects it as a usage error."""
+    with pytest.raises(SystemExit) as excinfo:
+        main([
+            "record",
+            "--base-url", "http://stub.invalid/v1/chat/completions",
+            "--model", "m",
+            "--message", "hi",
+            "--timeout", "0",
+        ])
+    assert excinfo.value.code == 2
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_broken_pipe_exits_quietly(tmp_path, monkeypatch):
+    """Closing the consumer early (`| head`) must not produce an
+    'Exception ignored ... BrokenPipeError' dump or exit code 120."""
+
+    class BrokenStdout:
+        def write(self, *a):
+            raise BrokenPipeError("closed")
+
+        def flush(self):
+            pass
+
+        def fileno(self):
+            raise OSError("no fd")
+
+    f = tmp_path / "s.txt"
+    f.write_text("data: [DONE]\n\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "stdout", BrokenStdout())
+    rc = main(["analyze", str(f)])
+    assert rc == 1
+
+
 def test_json_output(tmp_path, capsys):
     f = tmp_path / "s.txt"
     f.write_text("data: [DONE]\n\n", encoding="utf-8")  # done but zero chunks

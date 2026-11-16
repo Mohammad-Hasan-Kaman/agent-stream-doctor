@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import List, Optional
 
@@ -108,8 +109,12 @@ def cmd_record(args: argparse.Namespace) -> int:
     report = diagnose(text)
     print(_format_report(report, as_json=args.json))
     if args.save_report:
-        with open(args.save_report, "w", encoding="utf-8") as fh:
-            fh.write(_format_report(report, as_json=True))
+        try:
+            with open(args.save_report, "w", encoding="utf-8") as fh:
+                fh.write(_format_report(report, as_json=True))
+        except OSError as exc:
+            print(f"Could not write the report file: {exc}", file=sys.stderr)
+            return 2
     return 0 if report.healthy else 1
 
 
@@ -129,6 +134,20 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0 if report.healthy else 1
 
 
+def _positive_seconds(value: str) -> int:
+    """argparse type for --timeout: urllib3 raises a bare ValueError
+    for a timeout of 0 or less, which surfaced as a traceback."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {value!r}")
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(
+            "timeout must be a positive number of seconds"
+        )
+    return ivalue
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="agent-stream-doctor",
@@ -142,7 +161,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_rec.add_argument("--message", help="single user message to send")
     p_rec.add_argument("--messages-file", help="JSON file with a full messages array")
     p_rec.add_argument("--api-key", default=None, help="Bearer token (or set OPENAI_API_KEY)")
-    p_rec.add_argument("--timeout", type=int, default=300)
+    p_rec.add_argument("--timeout", type=_positive_seconds, default=300)
     p_rec.add_argument("--out", default="stream.txt", help="where to save the raw SSE text")
     p_rec.add_argument("--save-report", help="also write the JSON report to this path")
 
@@ -155,12 +174,31 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     api_key = getattr(args, "api_key", None)
     if args.command == "record" and not api_key:
-        import os
         args.api_key = os.environ.get("OPENAI_API_KEY")
 
-    if args.command == "record":
-        return cmd_record(args)
-    return cmd_analyze(args)
+    try:
+        if args.command == "record":
+            rc = cmd_record(args)
+        else:
+            rc = cmd_analyze(args)
+        # Flush explicitly inside the try: the tail of a large
+        # report can sit in the stdio buffer until interpreter
+        # shutdown, where a broken pipe surfaces as exit code 120
+        # and an 'Exception ignored' dump that no handler can catch.
+        sys.stdout.flush()
+        return rc
+    except BrokenPipeError:
+        # The consumer closed the pipe early (e.g. `| head -1` on a
+        # large report). Point stdout at /dev/null so the
+        # interpreter's shutdown flush does not add an
+        # 'Exception ignored ... BrokenPipeError' dump, and exit
+        # quietly instead of with code 120 and noise.
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except OSError:
+            pass
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover
