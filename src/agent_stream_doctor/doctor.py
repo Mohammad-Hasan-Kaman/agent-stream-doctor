@@ -20,19 +20,6 @@ from .sse import (
     parse_sse_lines,
 )
 
-_DONE = "[DONE]"
-
-
-def _ev(chunk: Dict[str, Any]) -> str:
-    """Compact evidence string for a chunk."""
-    import json
-
-    try:
-        return json.dumps(chunk)[:200]
-    except (TypeError, ValueError):  # pragma: no cover - defensive
-        return str(chunk)[:200]
-
-
 def diagnose(text: str) -> Report:
     """Analyse one raw OpenAI-compatible SSE stream and return a report."""
     findings: List[Finding] = []
@@ -54,15 +41,24 @@ def diagnose(text: str) -> Report:
     data_events = [e for e in events if not e.is_done_sentinel]
     done_events = [e for e in events if e.is_done_sentinel]
 
-    bad_json = [e for e in data_events if e.json_error]
+    bad_json = [
+        e
+        for e in data_events
+        if e.json_error or (e.json_value is not None and not isinstance(e.json_value, dict))
+    ]
     if bad_json:
         first = bad_json[0]
+        detail = (
+            f"first error: {first.json_error}"
+            if first.json_error
+            else "first payload is valid JSON but not an object"
+        )
         findings.append(
             Finding(
                 "invalid-json-payload",
                 Severity.ERROR,
                 f"{len(bad_json)} 'data:' payload(s) are not valid JSON "
-                f"(first error: {first.json_error})",
+                f"objects ({detail})",
                 evidence=first.raw_data[:200],
             )
         )
@@ -72,20 +68,28 @@ def diagnose(text: str) -> Report:
     ]
 
     # ---- stream-shape checks ----------------------------------------
-    stats: Dict[str, Optional[str]] = {
+    stats: Dict[str, Any] = {
         "data_chunks": len(data_events),
         "done_sentinels": len(done_events),
         "json_errors": len(bad_json),
         "sse_line_errors": len(sse_errors),
     }
 
-    if len(done_events) > 1:
+    events_after_done = 0
+    seen_done = False
+    for e in events:
+        if seen_done:
+            events_after_done += 1
+        if e.is_done_sentinel:
+            seen_done = True
+    if events_after_done:
         findings.append(
             Finding(
                 "data-after-done",
                 Severity.WARNING,
-                f"Stream contains {len(done_events)} '[DONE]' sentinels; "
-                "everything after the first is unreachable for most clients.",
+                f"{events_after_done} event(s) arrived after the first "
+                "'[DONE]' sentinel. Clients typically stop reading at "
+                "'[DONE]', so anything after it is silently lost.",
             )
         )
 
@@ -116,11 +120,13 @@ def diagnose(text: str) -> Report:
             entry = tool_calls.setdefault(idx, {"id": None, "name": "", "arguments": ""})
             if tc.get("id"):
                 entry["id"] = tc["id"]
-            if tc.get("function", {}).get("name"):
-                entry["name"] = tc["function"]["name"]
-            args = tc.get("function", {}).get("arguments")
-            if isinstance(args, str):
-                entry["arguments"] += args
+            fn = tc.get("function")
+            if isinstance(fn, dict):
+                if fn.get("name"):
+                    entry["name"] = fn["name"]
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    entry["arguments"] += args
 
     content = "".join(content_parts)
     reasoning = "".join(reasoning_parts)
@@ -136,13 +142,13 @@ def diagnose(text: str) -> Report:
     )
 
     # ---- empty stream -------------------------------------------------
-    if not chunks and not done_events and not sse_errors:
+    if not chunks and not data_events and not sse_errors:
         findings.append(
             Finding(
                 "empty-stream",
                 Severity.ERROR,
                 "Stream contained no completion data at all - zero data "
-                "chunks, no '[DONE]'. The server closed an empty response.",
+                "chunks. The server closed an empty response.",
             )
         )
         stats["content_chars"] = 0
@@ -151,7 +157,7 @@ def diagnose(text: str) -> Report:
         return report
 
     # ---- reasoning-only responses --------------------------------------
-    if chunks and not content.strip():
+    if chunks and not content.strip() and not tool_calls:
         if reasoning.strip():
             findings.append(
                 Finding(

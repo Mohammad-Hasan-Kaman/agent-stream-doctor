@@ -87,6 +87,85 @@ def test_empty_content_stream_flagged():
     assert "empty-content-stream" in ids(report)
 
 
+def test_malformed_chunk_shapes_do_not_crash():
+    """Valid JSON with the wrong shape must become findings, not
+    exceptions - the tool exists for broken streams."""
+    broken_streams = [
+        'data: {"choices":[{"delta":"oops"}]}\n\ndata: [DONE]\n\n',
+        'data: {"choices":"nope"}\n\ndata: [DONE]\n\n',
+        'data: {"choices":[42]}\n\ndata: [DONE]\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":null}]}}]}\n\ndata: [DONE]\n\n',
+        'data: {"choices":[{"delta":{"content":123}}]}\n\ndata: [DONE]\n\n',
+    ]
+    for text in broken_streams:
+        report = diagnose(text)  # must not raise
+        assert isinstance(report.findings, list)
+
+
+def test_data_after_single_done_detected():
+    """Chunks after one [DONE] (and no second one) are still lost
+    chunks - the check is about position, not sentinel count."""
+    text = (
+        'data: {"choices":[{"delta":{"role":"assistant","content":"Hi"}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        "data: [DONE]\n\n"
+        'data: {"choices":[{"delta":{"content":"ghost"}}]}\n\n'
+    )
+    report = diagnose(text)
+    assert "data-after-done" in ids(report)
+
+
+def test_complete_tool_call_stream_is_healthy():
+    """A pure tool-call response has no text content by design; it
+    must not be flagged as an empty-content stream."""
+    report = diagnose(streams.TOOL_CALL_COMPLETE)
+    assert report.healthy, [f.to_dict() for f in report.findings]
+
+
+def test_lone_done_sentinel_is_an_empty_stream():
+    report = diagnose("data: [DONE]\n\n")
+    assert "empty-stream" in ids(report)
+    assert not report.healthy
+
+
+def test_non_object_payload_flagged():
+    """A payload that parses as JSON but is not an object (e.g. a
+    double-encoded response) is not a usable chunk."""
+    report = diagnose('data: 42\n\ndata: "text"\n\ndata: [DONE]\n\n')
+    assert "invalid-json-payload" in ids(report)
+    assert not report.healthy
+
+
+def test_content_as_list_of_parts_is_counted():
+    text = (
+        'data: {"choices":[{"delta":{"role":"assistant",'
+        '"content":[{"type":"text","text":"Hello"}]}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    report = diagnose(text)
+    assert report.stats["content_chars"] == len("Hello")
+    assert report.healthy, [f.to_dict() for f in report.findings]
+
+
+def test_bom_prefixed_stream_is_healthy():
+    report = diagnose("\ufeff" + streams.HEALTHY)
+    assert report.healthy, [f.to_dict() for f in report.findings]
+    assert report.stats["content_chars"] == len("Hello world")
+
+
+def test_multiline_data_payload_diagnosed_as_content():
+    text = (
+        'data: {"choices":[{"delta":{"role":"assistant",\n'
+        'data: "content":"Hi"}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    report = diagnose(text)
+    assert "invalid-json-payload" not in ids(report)
+    assert report.stats["content_chars"] == len("Hi")
+
+
 def test_report_serializes_to_json():
     report = diagnose(streams.REASONING_ONLY)
     data = json.loads(json.dumps(report.to_dict()))
