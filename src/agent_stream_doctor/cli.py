@@ -1,12 +1,15 @@
 """Capture a live chat-completion stream to a file and diagnose it.
 
-Two modes:
+Two subcommands:
 
-* ``--record``  : perform the request and save the raw SSE text, then
-                  analyse it. Requires only ``requests`` (or httpx) at
-                  runtime - imported lazily so the library itself stays
-                  dependency-free.
-* ``--analyze`` : offline analysis of an already-captured stream file.
+* ``record``  : perform the request and save the raw SSE text, then
+                analyse it. Requires ``requests`` at runtime -
+                imported lazily so the library itself stays
+                dependency-free.
+* ``analyze`` : offline analysis of an already-captured stream file.
+
+Exit codes: 0 = healthy, 1 = problems found, 2 = usage error
+(including unreadable files and failed requests - never a traceback).
 """
 from __future__ import annotations
 
@@ -50,15 +53,13 @@ def _format_report(report, as_json: bool) -> str:
 
 def cmd_record(args: argparse.Namespace) -> int:
     try:
-        import requests  # noqa: F401
+        import requests
     except ImportError:
         print(
-            "The --record mode needs the 'requests' package: pip install requests",
+            "The record command needs the 'requests' package: pip install requests",
             file=sys.stderr,
         )
         return 2
-
-    import requests
 
     headers = {"Content-Type": "application/json"}
     if args.api_key:
@@ -68,22 +69,33 @@ def cmd_record(args: argparse.Namespace) -> int:
     if args.message:
         payload["messages"] = [{"role": "user", "content": args.message}]
     elif args.messages_file:
-        with open(args.messages_file, encoding="utf-8") as fh:
-            payload["messages"] = json.load(fh)
+        try:
+            with open(args.messages_file, encoding="utf-8") as fh:
+                payload["messages"] = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"Could not read --messages-file: {exc}", file=sys.stderr)
+            return 2
     else:
         print("Provide --message or --messages-file", file=sys.stderr)
         return 2
 
     collected = []
-    with requests.post(args.base_url, headers=headers, json=payload, stream=True,
-                       timeout=args.timeout) as resp:
-        resp.raise_for_status()
-        with open(args.out, "w", encoding="utf-8") as fh:
-            for raw in resp.iter_lines(decode_unicode=True):
-                if raw is None:
-                    continue
-                fh.write(raw + "\n")
-                collected.append(raw)
+    try:
+        with requests.post(args.base_url, headers=headers, json=payload, stream=True,
+                           timeout=args.timeout) as resp:
+            resp.raise_for_status()
+            with open(args.out, "w", encoding="utf-8") as fh:
+                for raw in resp.iter_lines(decode_unicode=True):
+                    if raw is None:
+                        continue
+                    fh.write(raw + "\n")
+                    collected.append(raw)
+    except requests.RequestException as exc:
+        print(f"Request failed: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"Could not write the capture file: {exc}", file=sys.stderr)
+        return 2
 
     text = "\n".join(collected)
     report = diagnose(text)
@@ -95,8 +107,12 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
-    with open(args.file, encoding="utf-8") as fh:
-        text = fh.read()
+    try:
+        with open(args.file, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeError) as exc:
+        print(f"Could not read {args.file}: {exc}", file=sys.stderr)
+        return 2
     report = diagnose(text)
     print(_format_report(report, as_json=args.json))
     return 0 if report.healthy else 1
