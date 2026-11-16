@@ -3,6 +3,45 @@
 All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] - 2026-11-16
+
+### Fixed
+
+- `diagnose()` no longer crashes on a non-string `finish_reason`
+  (object, list, number, NaN); only string values count as stream
+  termination, anything else surfaces as `missing-finish-reason`.
+- Tool-call deltas with an unhashable `index` no longer crash, and
+  distinct tool calls are no longer merged into one another:
+  `index: null` no longer shadows a usable `id`, and a delta carrying
+  a name or id opens a fresh call instead of concatenating arguments
+  into a false `unparseable-tool-arguments`.
+- Deeply nested JSON payloads (~20k levels) now produce findings
+  instead of a `RecursionError` crash, in event payloads, the
+  completeness probe, and tool-argument reassembly.
+- A stream of `data: null` payloads is now flagged as
+  `invalid-json-payload` instead of being reported healthy.
+- SSE lines are split strictly on CR/LF. Unicode line separators
+  (U+2028, U+2029, U+0085) inside JSON strings no longer shred a
+  valid stream into phantom malformed-line and invalid-JSON errors,
+  and the field value trim now removes exactly one leading space,
+  as the SSE spec requires.
+- `record` saves the raw response bytes verbatim and decodes a copy
+  as UTF-8. Previously it decoded with the server's guessed charset
+  (ISO-8859-1 when none was sent, the normal case for
+  `text/event-stream`), which mojibaked every non-ASCII stream and
+  wrote the corruption to disk as the capture. `analyze` now reads
+  captures with replacement characters instead of refusing files
+  that contain invalid UTF-8 bytes.
+- CLI: `--save-report` to an unwritable path, `--timeout 0` or a
+  negative timeout, and a broken pipe on stdout now all end with a
+  clean one-line error and a documented exit code (2, 2, and 1)
+  instead of tracebacks or an exit-120 flush dump.
+
+### Tests
+
+34 -> 49 tests, all passing, including a stubbed-`requests` record
+test that captures a one-byte-at-a-time UTF-8 stream byte-for-byte.
+
 ## [0.2.1] - 2026-11-16
 
 ### Fixed
