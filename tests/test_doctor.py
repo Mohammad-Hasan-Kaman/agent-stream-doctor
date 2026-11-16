@@ -166,6 +166,32 @@ def test_multiline_data_payload_diagnosed_as_content():
     assert report.stats["content_chars"] == len("Hi")
 
 
+def test_non_string_finish_reason_does_not_crash():
+    """A router emitting finish_reason as an object, list, number or
+    bool produces a malformed chunk, not a TypeError. None of these
+    count as a termination, so missing-finish-reason must fire."""
+    for fr in ('{"a":1}', '["stop"]', "123", "true", "NaN"):
+        chunk = (
+            '{"choices":[{"delta":{"role":"assistant","content":"x"},'
+            f'"finish_reason":{fr}' + "}]}"
+        )
+        text = f"data: {chunk}\n\ndata: [DONE]\n\n"
+        report = diagnose(text)  # must not raise
+        assert "missing-finish-reason" in ids(report), fr
+
+
+def test_mixed_type_finish_reasons_do_not_crash():
+    """One string and one numeric finish_reason: the numeric one is
+    ignored, the string terminates the choice - no crash in sorted()."""
+    text = (
+        'data: {"choices":[{"delta":{"content":"x"},"finish_reason":123}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    report = diagnose(text)
+    assert report.stats["finish_reasons"] == ["stop"]
+
+
 def test_report_serializes_to_json():
     report = diagnose(streams.REASONING_ONLY)
     data = json.loads(json.dumps(report.to_dict()))

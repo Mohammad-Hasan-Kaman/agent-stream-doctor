@@ -112,7 +112,12 @@ def diagnose(text: str) -> Report:
         reasoning_parts.append(chunk_reasoning_text(ch))
 
         fr = chunk_finish_reason(ch)
-        if fr is not None:
+        if isinstance(fr, str):
+            # A finish_reason that is not a string (a router emitting
+            # 123, true, {...}) is not a termination. Counting it
+            # would both lie about the stream having finished and
+            # crash the set()/sorted() aggregation below on
+            # unhashable or mutually incomparable values.
             finish_reasons.append(fr)
 
         for tc in chunk_tool_call_deltas(ch):
