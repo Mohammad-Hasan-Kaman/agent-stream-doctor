@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/banner.jpg" alt="agent-stream-doctor — why does your LLM stream come back empty?" width="100%">
-</p>
+![agent-stream-doctor banner](assets/banner.jpg)
 
 ### 🌐 Telegram: [@mohaka_programmer](https://t.me/mohaka_programmer)
 
