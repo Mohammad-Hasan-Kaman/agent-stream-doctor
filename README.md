@@ -8,6 +8,8 @@
 
 # 🩺 agent-stream-doctor
 
+**Project page:** [Agent Stream Doctor on mhkaman.com](https://mhkaman.com/en/projects/agent-stream-doctor/)
+
 [![CI](https://github.com/Mohammad-Hasan-Kaman/agent-stream-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/Mohammad-Hasan-Kaman/agent-stream-doctor/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg?logo=python&logoColor=white)](pyproject.toml)
